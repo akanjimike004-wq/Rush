@@ -11,6 +11,22 @@ export interface Task {
   submittedAt?: string;
 }
 
+export interface Withdrawal {
+  id: string;
+  userId: string;
+  userName: string;
+  amount: number;
+  fee: number;
+  netAmount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  timestamp: string;
+  bankDetails: {
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+  };
+}
+
 export interface User {
   id: string;
   name: string;
@@ -21,6 +37,12 @@ export interface User {
   role: 'user' | 'admin';
   status: 'active' | 'pending' | 'suspended';
   subscriptionExpiry?: string;
+  bankDetails?: {
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+    lastUpdated: string;
+  };
   recentActivity: {
     id: string;
     type: string;

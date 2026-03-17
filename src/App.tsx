@@ -29,10 +29,12 @@ import {
   ArrowRight,
   ShieldAlert,
   Lock,
+  Building2,
+  CreditCard,
   User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Task, User } from './types';
+import { Task, User, Withdrawal } from './types';
 
 const MOCK_TASKS: Task[] = [
   { id: '1', platform: 'Instagram', type: 'Like', reward: 50, description: 'Like the latest post on @tech_trends', url: 'https://instagram.com', status: 'available' },
@@ -242,6 +244,70 @@ export default function App() {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
 
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>(() => {
+    const saved = localStorage.getItem('socialpay_withdrawals');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('socialpay_withdrawals', JSON.stringify(withdrawals));
+  }, [withdrawals]);
+
+  const handleWithdraw = (amount: number) => {
+    if (!user.bankDetails) return;
+    
+    const fee = amount * 0.1;
+    const netAmount = amount - fee;
+    
+    const newWithdrawal: Withdrawal = {
+      id: Math.random().toString(36).substr(2, 9),
+      userId: user.id,
+      userName: user.name,
+      amount,
+      fee,
+      netAmount,
+      status: 'pending',
+      timestamp: new Date().toISOString(),
+      bankDetails: {
+        bankName: user.bankDetails.bankName,
+        accountName: user.bankDetails.accountName,
+        accountNumber: user.bankDetails.accountNumber,
+      }
+    };
+
+    setWithdrawals(prev => [newWithdrawal, ...prev]);
+    
+    const updatedUser = {
+      ...user,
+      balance: user.balance - amount,
+      recentActivity: [
+        {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'Withdrawal Request',
+          amount: -amount,
+          timestamp: new Date().toISOString()
+        },
+        ...user.recentActivity
+      ]
+    };
+    
+    handleUpdateUser(updatedUser);
+  };
+
+  const handleUpdateWithdrawalStatus = (id: string, status: Withdrawal['status']) => {
+    setWithdrawals(prev => prev.map(w => w.id === id ? { ...w, status } : w));
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+    localStorage.setItem('socialpay_user', JSON.stringify(updatedUser));
+    setUsers(prev => {
+      const newUsers = prev.map(u => u.id === updatedUser.id ? updatedUser : u);
+      localStorage.setItem('socialpay_users', JSON.stringify(newUsers));
+      return newUsers;
+    });
+  };
+
   const renderContent = () => {
     // Protected routes check
     const protectedTabs = ['dashboard', 'marketplace', 'wallet'];
@@ -258,11 +324,11 @@ export default function App() {
           />
         );
       case 'dashboard':
-        return <DashboardView user={user} tasks={tasks} />;
+        return <DashboardView user={user} tasks={tasks} onNavigate={setActiveTab} onUpdateUser={handleUpdateUser} />;
       case 'marketplace':
         return <MarketplaceView tasks={tasks} onComplete={submitTaskProof} />;
       case 'wallet':
-        return <WalletView user={user} />;
+        return <WalletView user={user} onUpdateUser={handleUpdateUser} onWithdraw={handleWithdraw} withdrawals={withdrawals.filter(w => w.userId === user.id)} />;
       case 'about':
         return <AboutView />;
       case 'contact':
@@ -270,12 +336,14 @@ export default function App() {
       case 'privacy':
         return <PrivacyPolicyView />;
       case 'admin':
-        if (user.role !== 'admin') return <DashboardView user={user} tasks={tasks} />;
+        if (user.role !== 'admin') return <DashboardView user={user} tasks={tasks} onNavigate={setActiveTab} onUpdateUser={handleUpdateUser} />;
         if (!isAdminAuthenticated) return <AdminLoginView onLogin={() => setIsAdminAuthenticated(true)} />;
         return (
           <AdminView 
             users={users} 
             tasks={tasks} 
+            withdrawals={withdrawals}
+            onUpdateWithdrawalStatus={handleUpdateWithdrawalStatus}
             onUpdateUserStatus={(userId, status) => {
               setUsers(prev => prev.map(u => u.id === userId ? { ...u, status } : u));
             }}
@@ -291,20 +359,20 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 overflow-hidden">
+    <div className="flex flex-col h-screen h-[100dvh] bg-slate-50 overflow-hidden">
       {/* Top Navbar */}
       <header className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-slate-200 z-50 shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             {/* Logo */}
             <div 
-              className="flex items-center gap-2 text-emerald-600 font-bold text-2xl cursor-pointer shrink-0"
+              className="flex items-center gap-2 text-emerald-600 font-bold text-xl sm:text-2xl cursor-pointer shrink-0"
               onClick={() => setActiveTab('home')}
             >
-              <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
-                <TrendingUp size={24} />
+              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-emerald-600 rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+                <TrendingUp size={20} className="sm:w-6 sm:h-6" />
               </div>
-              <span className="hidden sm:inline tracking-tight">SocialPay</span>
+              <span className="tracking-tight">SocialPay</span>
             </div>
 
             {/* Desktop Navigation */}
@@ -334,17 +402,17 @@ export default function App() {
               </div>
 
               {isAuthenticated ? (
-                <div className="flex items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2">
                   <div className="hidden sm:flex flex-col items-end mr-1">
                     <p className="text-xs font-bold text-slate-900 leading-none">{user.name}</p>
                     <p className="text-[10px] font-medium text-emerald-600 leading-none mt-1">₦{user.balance.toLocaleString()}</p>
                   </div>
                   
                   <div className="relative group/profile">
-                    <button className="w-10 h-10 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 font-bold text-sm hover:bg-emerald-200 transition-colors">
+                    <button className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 font-bold text-sm hover:bg-emerald-200 transition-colors">
                       {user.name.charAt(0)}
                     </button>
-                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>
+                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
 
                     {/* Profile Dropdown */}
                     <div className="absolute right-0 top-full pt-2 opacity-0 invisible group-hover/profile:opacity-100 group-hover/profile:visible transition-all duration-200 z-[60]">
@@ -402,93 +470,98 @@ export default function App() {
               {/* Mobile Menu Toggle */}
               <button 
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="lg:hidden p-2.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+                className="lg:hidden p-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
               >
                 {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
               </button>
             </div>
           </div>
         </div>
-
-        {/* Mobile Navigation Overlay */}
-        <AnimatePresence>
-          {isMobileMenuOpen && (
-            <>
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 lg:hidden"
-              />
-              <motion.div
-                initial={{ x: '100%' }}
-                animate={{ x: 0 }}
-                exit={{ x: '100%' }}
-                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="fixed right-0 top-0 bottom-0 w-72 bg-white z-50 shadow-2xl lg:hidden flex flex-col"
-              >
-                <div className="p-6 flex items-center justify-between border-b border-slate-100">
-                  <div className="flex items-center gap-2 text-emerald-600 font-bold text-xl">
-                    <TrendingUp size={24} />
-                    <span>SocialPay</span>
-                  </div>
-                  <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 rounded-lg hover:bg-slate-100">
-                    <X size={20} />
-                  </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                  <MobileNavItem icon={<Home size={20} />} label="Home" active={activeTab === 'home'} onClick={() => handleNavClick('home')} />
-                  <MobileNavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => handleNavClick('dashboard')} />
-                  <MobileNavItem icon={<ShoppingBag size={20} />} label="Marketplace" active={activeTab === 'marketplace'} onClick={() => handleNavClick('marketplace')} />
-                  <MobileNavItem icon={<Wallet size={20} />} label="Wallet" active={activeTab === 'wallet'} onClick={() => handleNavClick('wallet')} />
-                  
-                  <div className="pt-4 pb-2">
-                    <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Support & Info</p>
-                    <MobileNavItem icon={<Info size={20} />} label="About Us" active={false} onClick={() => handleNavClick('home', 'about')} />
-                    <MobileNavItem icon={<Mail size={20} />} label="Contact" active={false} onClick={() => handleNavClick('home', 'contact')} />
-                    <MobileNavItem icon={<ShieldCheck size={20} />} label="Privacy Policy" active={activeTab === 'privacy'} onClick={() => handleNavClick('privacy')} />
-                  </div>
-                </div>
-
-                {isAuthenticated ? (
-                  <div className="p-4 border-t border-slate-100 bg-slate-50">
-                    <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold">
-                        {user.name.charAt(0)}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-bold text-slate-900">{user.name}</p>
-                        <p className="text-xs text-emerald-600 font-medium">₦{user.balance.toLocaleString()}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
-                      className="w-full py-3 flex items-center justify-center gap-2 text-red-600 font-bold hover:bg-red-50 rounded-xl transition-colors"
-                    >
-                      <LogOut size={18} />
-                      Logout
-                    </button>
-                  </div>
-                ) : (
-                  <div className="p-4 border-t border-slate-100">
-                    <button 
-                      onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-                      className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-100"
-                    >
-                      Sign In to Account
-                    </button>
-                  </div>
-                )}
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
       </header>
 
+      {/* Mobile Bottom Navigation */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-50 px-2 pb-safe">
+        <div className="flex justify-around items-center h-16">
+          <BottomNavItem icon={<Home size={20} />} label="Home" active={activeTab === 'home'} onClick={() => handleNavClick('home')} />
+          <BottomNavItem icon={<ShoppingBag size={20} />} label="Market" active={activeTab === 'marketplace'} onClick={() => handleNavClick('marketplace')} />
+          <BottomNavItem icon={<Wallet size={20} />} label="Wallet" active={activeTab === 'wallet'} onClick={() => handleNavClick('wallet')} />
+          <BottomNavItem icon={<LayoutDashboard size={20} />} label="Dash" active={activeTab === 'dashboard'} onClick={() => handleNavClick('dashboard')} />
+        </div>
+      </nav>
+
+      {/* Mobile Navigation Overlay */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] lg:hidden"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed right-0 top-0 bottom-0 w-72 bg-white z-[101] shadow-2xl lg:hidden flex flex-col"
+            >
+              <div className="p-6 flex items-center justify-between border-b border-slate-100">
+                <div className="flex items-center gap-2 text-emerald-600 font-bold text-xl">
+                  <TrendingUp size={24} />
+                  <span>SocialPay</span>
+                </div>
+                <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 rounded-lg hover:bg-slate-100">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                <div className="pb-2">
+                  <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Support & Info</p>
+                  <MobileNavItem icon={<Info size={20} />} label="About Us" active={false} onClick={() => handleNavClick('home', 'about')} />
+                  <MobileNavItem icon={<Mail size={20} />} label="Contact" active={false} onClick={() => handleNavClick('home', 'contact')} />
+                  <MobileNavItem icon={<ShieldCheck size={20} />} label="Privacy Policy" active={activeTab === 'privacy'} onClick={() => handleNavClick('privacy')} />
+                </div>
+              </div>
+
+              {isAuthenticated ? (
+                <div className="p-4 border-t border-slate-100 bg-slate-50">
+                  <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 mb-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold">
+                      {user.name.charAt(0)}
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold text-slate-900">{user.name}</p>
+                      <p className="text-xs text-emerald-600 font-medium">₦{user.balance.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
+                    className="w-full py-3 flex items-center justify-center gap-2 text-red-600 font-bold hover:bg-red-50 rounded-xl transition-colors"
+                  >
+                    <LogOut size={18} />
+                    Logout
+                  </button>
+                </div>
+              ) : (
+                <div className="p-4 border-t border-slate-100">
+                  <button 
+                    onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-100"
+                  >
+                    Sign In to Account
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto min-h-0 pb-16 lg:pb-0">
         <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
           <AnimatePresence mode="wait">
             <motion.div
@@ -592,7 +665,50 @@ function MobileNavItem({ icon, label, active, onClick }: { icon: React.ReactNode
   );
 }
 
-function DashboardView({ user, tasks }: { user: User, tasks: Task[] }) {
+function BottomNavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active: boolean, onClick: () => void }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center gap-1 flex-1 h-full transition-all ${
+        active ? 'text-emerald-600' : 'text-slate-400'
+      }`}
+    >
+      <div className={`p-1 rounded-lg transition-all ${active ? 'bg-emerald-50' : ''}`}>
+        {icon}
+      </div>
+      <span className="text-[10px] font-bold uppercase tracking-tighter">{label}</span>
+    </button>
+  );
+}
+
+type AppTab = 'admin' | 'home' | 'dashboard' | 'marketplace' | 'wallet' | 'about' | 'contact' | 'privacy';
+
+function DashboardView({ 
+  user, 
+  tasks, 
+  onNavigate,
+  onUpdateUser
+}: { 
+  user: User, 
+  tasks: Task[], 
+  onNavigate: (tab: AppTab) => void,
+  onUpdateUser: (user: User) => void
+}) {
+  // Expose onUpdateUser for the form
+  useEffect(() => {
+    (window as any).handleUpdateUserFromDashboard = onUpdateUser;
+  }, [onUpdateUser]);
+
+  const lastUpdated = user.bankDetails?.lastUpdated;
+  const daysSinceUpdate = lastUpdated 
+    ? Math.floor((new Date().getTime() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+    
+  const isLocked = daysSinceUpdate !== null && daysSinceUpdate < 30;
+  const nextUpdateDate = lastUpdated 
+    ? new Date(new Date(lastUpdated).getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()
+    : null;
+
   const pendingTasks = tasks.filter(t => t.status === 'pending').length;
   const availableTasks = tasks.filter(t => t.status === 'available').length;
 
@@ -621,6 +737,89 @@ function DashboardView({ user, tasks }: { user: User, tasks: Task[] }) {
           color="orange"
         />
       </div>
+
+      {user.bankDetails && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isLocked ? 'bg-slate-100 text-slate-400' : 'bg-orange-50 text-orange-600'}`}>
+              {isLocked ? <Lock size={24} /> : <Building2 size={24} />}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Linked Bank Account</p>
+                {isLocked && (
+                  <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-bold">
+                    LOCKED
+                  </span>
+                )}
+              </div>
+              <h4 className="font-bold text-slate-900">{user.bankDetails.bankName}</h4>
+              <p className="text-xs text-slate-500">
+                {isLocked ? 'Account Name Hidden' : user.bankDetails.accountName} • 
+                {isLocked ? ' ****' : ' ' + user.bankDetails.accountNumber.slice(-4)}
+              </p>
+              {isLocked && (
+                <p className="text-[10px] text-slate-400 mt-1">Visible again on {nextUpdateDate}</p>
+              )}
+            </div>
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold ${isLocked ? 'bg-slate-50 text-slate-500' : 'bg-emerald-50 text-emerald-700'}`}>
+            {isLocked ? <Lock size={14} /> : <ShieldCheck size={14} />}
+            {isLocked ? 'Security Locked' : 'Verified & Secure'}
+          </div>
+        </div>
+      )}
+
+      {!user.bankDetails && (
+        <div className="bg-white p-8 rounded-[32px] border border-orange-200 shadow-xl shadow-orange-50/50">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="w-14 h-14 rounded-2xl bg-orange-100 flex items-center justify-center text-orange-600 shadow-sm">
+              <Building2 size={28} />
+            </div>
+            <div>
+              <h4 className="text-xl font-black text-slate-900">Setup Your Bank Payout</h4>
+              <p className="text-sm text-slate-500">Enter your bank details to enable withdrawals and receive your earnings.</p>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            <div className="bg-orange-50/50 p-6 rounded-2xl border border-orange-100">
+              <div className="flex items-start gap-3 mb-4">
+                <ShieldAlert className="text-orange-600 shrink-0 mt-0.5" size={20} />
+                <h5 className="font-bold text-orange-900">Security Notice</h5>
+              </div>
+              <ul className="space-y-3 text-sm text-orange-800">
+                <li className="flex gap-2">
+                  <span className="font-bold">•</span>
+                  <span>Once saved, details are locked for <strong>30 days</strong>.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold">•</span>
+                  <span>Ensure the account name matches your registered name.</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-bold">•</span>
+                  <span>10% service charge applies to all withdrawals.</span>
+                </li>
+              </ul>
+            </div>
+            
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
+              <BankDetailsForm 
+                onSave={(details) => {
+                  // We need to pass handleUpdateUser here
+                  // But DashboardView doesn't have it yet
+                  // Let's assume we'll pass it
+                  const updatedUser = { ...user, bankDetails: details };
+                  // This will be fixed in the props update
+                  (window as any).handleUpdateUserFromDashboard(updatedUser);
+                }} 
+                buttonText="Link Bank Account Now"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-2xl border border-slate-200">
@@ -835,7 +1034,244 @@ function TaskCard({ task, onComplete }: { task: Task, onComplete: (id: string, p
   );
 }
 
-function WalletView({ user }: { user: User }) {
+function BankDetailsForm({ 
+  onSave, 
+  currentDetails,
+  buttonText = "Save Bank Details"
+}: { 
+  onSave: (details: User['bankDetails']) => void,
+  currentDetails?: User['bankDetails'],
+  buttonText?: string
+}) {
+  const [bankName, setBankName] = useState(currentDetails?.bankName || '');
+  const [accountName, setAccountName] = useState(currentDetails?.accountName || '');
+  const [accountNumber, setAccountNumber] = useState(currentDetails?.accountNumber || '');
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      onSave({
+        bankName,
+        accountName,
+        accountNumber,
+        lastUpdated: new Date().toISOString()
+      });
+    }} className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-sm font-bold text-slate-700 ml-1">Bank Name</label>
+        <div className="relative">
+          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input 
+            type="text" 
+            required
+            value={bankName}
+            onChange={(e) => setBankName(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+            placeholder="e.g. Zenith Bank"
+          />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-bold text-slate-700 ml-1">Account Name</label>
+        <div className="relative">
+          <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input 
+            type="text" 
+            required
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+            placeholder="Full name on account"
+          />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-bold text-slate-700 ml-1">Account Number</label>
+        <div className="relative">
+          <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input 
+            type="text" 
+            required
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+            placeholder="10-digit account number"
+            pattern="\d{10}"
+            maxLength={10}
+          />
+        </div>
+      </div>
+      
+      <button 
+        type="submit"
+        className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-100 mt-2"
+      >
+        {buttonText}
+      </button>
+    </form>
+  );
+}
+
+function BankDetailsModal({ 
+  isOpen, 
+  onClose, 
+  onSave, 
+  currentDetails 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onSave: (details: User['bankDetails']) => void,
+  currentDetails?: User['bankDetails']
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+      >
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <h3 className="font-bold text-lg">Bank Account Details</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-xl transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-6">
+          <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex gap-3 mb-6">
+            <ShieldAlert className="text-blue-600 shrink-0" size={20} />
+            <p className="text-xs text-blue-800 leading-relaxed">
+              <strong>Important:</strong> Once saved, these details will be locked and hidden for <strong>30 days</strong> for security reasons.
+            </p>
+          </div>
+          <BankDetailsForm 
+            currentDetails={currentDetails} 
+            onSave={(details) => {
+              onSave(details);
+              onClose();
+            }} 
+          />
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function WithdrawalModal({ 
+  isOpen, 
+  onClose, 
+  onWithdraw, 
+  balance 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void, 
+  onWithdraw: (amount: number) => void,
+  balance: number
+}) {
+  const [amount, setAmount] = useState('');
+  const fee = Number(amount) * 0.1;
+  const netAmount = Number(amount) - fee;
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="bg-white rounded-[32px] w-full max-w-md overflow-hidden shadow-2xl"
+      >
+        <div className="p-8 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-2xl font-black text-slate-900">Withdraw Funds</h3>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          const val = Number(amount);
+          if (val >= 1000 && val <= balance) {
+            onWithdraw(val);
+            onClose();
+          }
+        }} className="p-8 space-y-6">
+          <div className="space-y-2">
+            <div className="flex justify-between items-end mb-1">
+              <label className="text-xs font-bold text-slate-400 uppercase ml-1">Amount to Withdraw (₦)</label>
+              <span className="text-xs font-bold text-emerald-600">Balance: ₦{balance.toLocaleString()}</span>
+            </div>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">₦</span>
+              <input 
+                type="number" 
+                required
+                min={1000}
+                max={balance}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full pl-10 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none transition-all text-lg font-bold"
+                placeholder="Min 1,000"
+              />
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl p-6 space-y-3 border border-slate-100">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Service Charge (10%)</span>
+              <span className="font-bold text-red-600">-₦{fee.toLocaleString()}</span>
+            </div>
+            <div className="h-px bg-slate-200 w-full"></div>
+            <div className="flex justify-between items-center">
+              <span className="font-bold text-slate-900">Net Payout</span>
+              <span className="text-xl font-black text-emerald-600">₦{netAmount.toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 p-4 bg-blue-50 rounded-2xl border border-blue-100">
+            <Info className="text-blue-600 shrink-0 mt-0.5" size={18} />
+            <p className="text-xs text-blue-800 leading-relaxed">
+              Funds will be sent to your linked bank account. Processing takes up to 50 hours.
+            </p>
+          </div>
+          
+          <button 
+            type="submit"
+            disabled={!amount || Number(amount) < 1000 || Number(amount) > balance}
+            className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100"
+          >
+            Confirm Withdrawal
+          </button>
+        </form>
+      </motion.div>
+    </div>
+  );
+}
+
+function WalletView({ 
+  user, 
+  onUpdateUser, 
+  onWithdraw, 
+  withdrawals 
+}: { 
+  user: User, 
+  onUpdateUser: (updatedUser: User) => void,
+  onWithdraw: (amount: number) => void,
+  withdrawals: Withdrawal[]
+}) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  
+  const lastUpdated = user.bankDetails?.lastUpdated;
+  const daysSinceUpdate = lastUpdated 
+    ? Math.floor((new Date().getTime() - new Date(lastUpdated).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+    
+  const isLocked = daysSinceUpdate !== null && daysSinceUpdate < 30;
+  const nextUpdateDate = lastUpdated 
+    ? new Date(new Date(lastUpdated).getTime() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString()
+    : null;
+
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div className="bg-slate-900 rounded-3xl p-10 text-white relative overflow-hidden">
@@ -844,7 +1280,16 @@ function WalletView({ user }: { user: User }) {
             <p className="text-slate-400 font-medium mb-1">Available Balance</p>
             <h2 className="text-5xl font-bold mb-6">₦{user.balance.toLocaleString()}</h2>
             <div className="flex gap-4">
-              <button className="bg-emerald-500 text-white px-8 py-3 rounded-xl font-bold hover:bg-emerald-400 transition-colors">
+              <button 
+                onClick={() => {
+                  if (!user.bankDetails) {
+                    setIsModalOpen(true);
+                  } else {
+                    setIsWithdrawModalOpen(true);
+                  }
+                }}
+                className="bg-emerald-500 text-white px-8 py-3 rounded-xl font-bold hover:bg-emerald-400 transition-colors"
+              >
                 Withdraw Funds
               </button>
               <button className="bg-white/10 backdrop-blur-md text-white px-8 py-3 rounded-xl font-bold hover:bg-white/20 transition-colors">
@@ -854,28 +1299,100 @@ function WalletView({ user }: { user: User }) {
           </div>
           <div className="hidden md:block">
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
-              <p className="text-sm text-slate-400 mb-4">Payout Methods</p>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm text-slate-400">Payout Methods</p>
+                {!isLocked && user.bankDetails && (
+                  <button 
+                    onClick={() => setIsModalOpen(true)}
+                    className="text-xs text-emerald-400 hover:underline font-medium"
+                  >
+                    Change
+                  </button>
+                )}
+              </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-xs font-bold">PP</div>
-                    <span className="text-sm font-medium">PayPal</span>
-                  </div>
-                  <div className="text-xs text-emerald-400">Connected</div>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 opacity-50">
-                  <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-xs font-bold">BT</div>
-                    <span className="text-sm font-medium">Bank Transfer</span>
+                    <div>
+                      <span className="text-sm font-medium block">Bank Transfer</span>
+                      {user.bankDetails && isLocked ? (
+                        <span className="text-[10px] text-slate-400">Locked until {nextUpdateDate}</span>
+                      ) : user.bankDetails ? (
+                        <span className="text-[10px] text-emerald-400">Ready to update</span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Not configured</span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-400">Not Set</div>
+                  <div className={`text-xs ${user.bankDetails ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {user.bankDetails ? (isLocked ? 'Encrypted' : 'Connected') : 'Not Set'}
+                  </div>
                 </div>
               </div>
+
+              {user.bankDetails && (
+                <div className="mt-4 p-4 bg-white/5 rounded-xl border border-white/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Verified Bank Account</p>
+                    {isLocked && <Lock size={12} className="text-slate-500" />}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-white">{user.bankDetails.bankName}</p>
+                    <p className="text-xs text-slate-300">{isLocked ? 'Account Name Hidden' : user.bankDetails.accountName}</p>
+                    <p className="text-xs text-slate-400 font-mono tracking-wider">
+                      ****{user.bankDetails.accountNumber.slice(-4)}
+                    </p>
+                  </div>
+                  {isLocked && (
+                    <p className="text-[10px] text-slate-500 mt-2 italic">
+                      Details locked until {nextUpdateDate} for security.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
         <div className="absolute -right-20 -top-20 w-64 h-64 bg-emerald-500/20 blur-[100px] rounded-full"></div>
       </div>
+
+      {!user.bankDetails && (
+        <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+              <Building2 size={28} />
+            </div>
+            <div>
+              <h3 className="text-2xl font-black text-slate-900">Link Your Bank Account</h3>
+              <p className="text-slate-500">Provide your details to receive payments directly to your bank.</p>
+            </div>
+          </div>
+          
+          <div className="max-w-md">
+            <BankDetailsForm 
+              onSave={(details) => onUpdateUser({ ...user, bankDetails: details })} 
+              buttonText="Save & Link Account"
+            />
+          </div>
+        </div>
+      )}
+
+      <BankDetailsModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        currentDetails={user.bankDetails}
+        onSave={(details) => {
+          onUpdateUser({ ...user, bankDetails: details });
+        }}
+      />
+
+      <WithdrawalModal 
+        isOpen={isWithdrawModalOpen}
+        onClose={() => setIsWithdrawModalOpen(false)}
+        onWithdraw={onWithdraw}
+        balance={user.balance}
+      />
 
       <div className="bg-orange-50 border border-orange-200 p-6 rounded-2xl flex items-start gap-4">
         <Clock className="text-orange-600 shrink-0 mt-1" size={24} />
@@ -893,23 +1410,53 @@ function WalletView({ user }: { user: User }) {
           </button>
         </div>
         <div className="divide-y divide-slate-50">
-          {[1, 2, 3, 4, 5].map(i => (
-            <div key={i} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
-              <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                  <TrendingUp size={18} />
+          {withdrawals.length > 0 ? (
+            withdrawals.map(w => (
+              <div key={w.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    w.status === 'approved' ? 'bg-emerald-50 text-emerald-600' : 
+                    w.status === 'rejected' ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'
+                  }`}>
+                    <Wallet size={18} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">Withdrawal Request</p>
+                    <p className="text-xs text-slate-500">{new Date(w.timestamp).toLocaleDateString()} • {new Date(w.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold">Task Reward: YouTube Subscribe</p>
-                  <p className="text-xs text-slate-500">Mar 16, 2026 • 10:45 AM</p>
+                <div className="text-right">
+                  <p className="text-sm font-bold text-red-600">-₦{w.amount.toLocaleString()}</p>
+                  <p className={`text-[10px] font-bold uppercase tracking-wider ${
+                    w.status === 'approved' ? 'text-emerald-600' : 
+                    w.status === 'rejected' ? 'text-red-600' : 'text-orange-600'
+                  }`}>{w.status}</p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-emerald-600">+₦250</p>
-                <p className="text-xs text-slate-400">Completed</p>
+            ))
+          ) : (
+            user.recentActivity.slice(0, 5).map(activity => (
+              <div key={activity.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                <div className="flex items-center gap-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    activity.amount > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {activity.amount > 0 ? <TrendingUp size={18} /> : <TrendingUp size={18} className="rotate-180" />}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">{activity.type}</p>
+                    <p className="text-xs text-slate-500">{new Date(activity.timestamp).toLocaleDateString()} • {new Date(activity.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-bold ${activity.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {activity.amount > 0 ? '+' : ''}₦{Math.abs(activity.amount).toLocaleString()}
+                  </p>
+                  <p className="text-xs text-slate-400">Completed</p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
@@ -1352,6 +1899,8 @@ function AdminLoginView({ onLogin }: { onLogin: () => void }) {
 function AdminView({ 
   users, 
   tasks, 
+  withdrawals,
+  onUpdateWithdrawalStatus,
   onUpdateUserStatus, 
   onDeleteUser,
   onAddTask,
@@ -1360,13 +1909,15 @@ function AdminView({
 }: { 
   users: User[], 
   tasks: Task[], 
+  withdrawals: Withdrawal[],
+  onUpdateWithdrawalStatus: (id: string, status: Withdrawal['status']) => void,
   onUpdateUserStatus: (userId: string, status: User['status']) => void,
   onDeleteUser: (userId: string) => void,
   onAddTask: (task: Omit<Task, 'id' | 'status'>) => void,
   onDeleteTask: (taskId: string) => void,
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void
 }) {
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'tasks'>('users');
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'tasks' | 'withdrawals'>('users');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
   
@@ -1380,8 +1931,15 @@ function AdminView({
     t.platform.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const filteredWithdrawals = withdrawals.filter(w => 
+    w.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    w.bankDetails.bankName.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   const totalBalance = users.reduce((sum, u) => sum + u.balance, 0);
+  const totalFees = withdrawals.reduce((sum, w) => sum + w.fee, 0);
   const pendingTasksCount = tasks.filter(t => t.status === 'pending').length;
+  const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'pending').length;
 
   return (
     <div className="space-y-8 pb-12">
@@ -1390,45 +1948,55 @@ function AdminView({
           <h2 className="text-3xl font-black text-slate-900">Admin Dashboard</h2>
           <p className="text-slate-500">Manage users, tasks, and monitor platform activity.</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
             <p className="text-[10px] font-bold text-slate-400 uppercase">Total User Funds</p>
             <p className="text-lg font-bold text-emerald-600">₦{totalBalance.toLocaleString()}</p>
           </div>
           <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <p className="text-[10px] font-bold text-slate-400 uppercase">Pending Tasks</p>
-            <p className="text-lg font-bold text-orange-600">{pendingTasksCount}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">Service Fees (10%)</p>
+            <p className="text-lg font-bold text-blue-600">₦{totalFees.toLocaleString()}</p>
+          </div>
+          <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-bold text-slate-400 uppercase">Pending Items</p>
+            <p className="text-lg font-bold text-orange-600">{pendingTasksCount + pendingWithdrawalsCount}</p>
           </div>
         </div>
       </div>
 
       {/* Admin Tabs */}
-      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl w-fit">
+      <div className="flex gap-2 bg-slate-100 p-1 rounded-2xl w-fit overflow-x-auto max-w-full">
         <button 
           onClick={() => { setActiveAdminTab('users'); setSearchTerm(''); }}
-          className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeAdminTab === 'users' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeAdminTab === 'users' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Users
         </button>
         <button 
           onClick={() => { setActiveAdminTab('tasks'); setSearchTerm(''); }}
-          className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${activeAdminTab === 'tasks' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeAdminTab === 'tasks' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Tasks
+        </button>
+        <button 
+          onClick={() => { setActiveAdminTab('withdrawals'); setSearchTerm(''); }}
+          className={`px-6 py-2 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${activeAdminTab === 'withdrawals' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+        >
+          Withdrawals {pendingWithdrawalsCount > 0 && <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded-full text-[10px]">{pendingWithdrawalsCount}</span>}
         </button>
       </div>
 
       <div className="bg-white rounded-[32px] border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h3 className="font-bold text-lg text-slate-900">
-            {activeAdminTab === 'users' ? 'User Management' : 'Task Management'}
+            {activeAdminTab === 'users' ? 'User Management' : activeAdminTab === 'tasks' ? 'Task Management' : 'Withdrawal Requests'}
           </h3>
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text" 
-                placeholder={activeAdminTab === 'users' ? "Search users..." : "Search tasks..."}
+                placeholder={activeAdminTab === 'users' ? "Search users..." : activeAdminTab === 'tasks' ? "Search tasks..." : "Search withdrawals..."}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none w-full md:w-64"
@@ -1530,7 +2098,7 @@ function AdminView({
                 ))}
               </tbody>
             </table>
-          ) : (
+          ) : activeAdminTab === 'tasks' ? (
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -1591,6 +2159,84 @@ function AdminView({
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-slate-50/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <th className="px-6 py-4">User</th>
+                  <th className="px-6 py-4">Bank Details</th>
+                  <th className="px-6 py-4">Amount</th>
+                  <th className="px-6 py-4">Fee (10%)</th>
+                  <th className="px-6 py-4">Net Payout</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredWithdrawals.map(w => (
+                  <tr key={w.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{w.userName}</p>
+                        <p className="text-[10px] text-slate-500">{new Date(w.timestamp).toLocaleString()}</p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-xs">
+                        <p className="font-bold text-slate-700">{w.bankDetails.bankName}</p>
+                        <p className="text-slate-500">{w.bankDetails.accountName}</p>
+                        <p className="font-mono text-slate-400">{w.bankDetails.accountNumber}</p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-bold text-slate-900">₦{w.amount.toLocaleString()}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-bold text-red-600">₦{w.fee.toLocaleString()}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-black text-emerald-600">₦{w.netAmount.toLocaleString()}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        w.status === 'approved' ? 'bg-emerald-100 text-emerald-700' :
+                        w.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-orange-100 text-orange-700'
+                      }`}>
+                        {w.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      {w.status === 'pending' && (
+                        <div className="flex items-center justify-end gap-2">
+                          <button 
+                            onClick={() => onUpdateWithdrawalStatus(w.id, 'approved')}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="Approve"
+                          >
+                            <CheckCircle2 size={18} />
+                          </button>
+                          <button 
+                            onClick={() => onUpdateWithdrawalStatus(w.id, 'rejected')}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Reject"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {filteredWithdrawals.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-slate-400">
+                      No withdrawal requests found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           )}
