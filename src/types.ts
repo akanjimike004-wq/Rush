@@ -31,12 +31,17 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  phoneNumber: string;
+  password?: string;
   balance: number;
   completedTasks: number;
   isPaid: boolean;
   role: 'user' | 'admin';
   status: 'active' | 'pending' | 'suspended';
   subscriptionExpiry?: string;
+  referralCode: string;
+  referredBy?: string;
+  referralEarnings: number;
   bankDetails?: {
     bankName: string;
     accountName: string;

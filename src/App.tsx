@@ -19,6 +19,7 @@ import {
   Bell,
   LogOut,
   ChevronRight,
+  ChevronDown,
   ExternalLink,
   Menu,
   X,
@@ -31,6 +32,7 @@ import {
   Lock,
   Building2,
   CreditCard,
+  Phone,
   User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -81,61 +83,121 @@ export default function App() {
     }
     setIsMobileMenuOpen(false);
   };
+  // Session duration (24 hours)
+  const SESSION_DURATION = 24 * 60 * 60 * 1000;
+
+  // Helper to check if a session is still valid
+  const isSessionValid = (key: string) => {
+    const timestamp = localStorage.getItem(key);
+    if (!timestamp) return false;
+    const now = new Date().getTime();
+    const loginTime = parseInt(timestamp, 10);
+    return (now - loginTime) < SESSION_DURATION;
+  };
+
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('socialpay_auth') === 'true';
+    const isAuth = localStorage.getItem('socialpay_auth') === 'true';
+    const isValid = isSessionValid('socialpay_auth_time');
+    return isAuth && isValid;
   });
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
+    const isAdminAuth = localStorage.getItem('socialpay_admin_auth') === 'true';
+    const isValid = isSessionValid('socialpay_admin_auth_time');
+    return isAdminAuth && isValid;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('socialpay_admin_auth', isAdminAuthenticated ? 'true' : 'false');
+    if (isAdminAuthenticated) {
+      if (!localStorage.getItem('socialpay_admin_auth_time')) {
+        localStorage.setItem('socialpay_admin_auth_time', new Date().getTime().toString());
+      }
+    } else {
+      localStorage.removeItem('socialpay_admin_auth_time');
+    }
+  }, [isAdminAuthenticated]);
+
+  useEffect(() => {
+    localStorage.setItem('socialpay_auth', isAuthenticated ? 'true' : 'false');
+    if (!isAuthenticated) {
+      localStorage.removeItem('socialpay_auth_time');
+      localStorage.removeItem('socialpay_user');
+    }
+  }, [isAuthenticated]);
+
+  // Session expiration checker
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (isAuthenticated && !isSessionValid('socialpay_auth_time')) {
+        console.log("User session expired");
+        handleLogout();
+      }
+      if (isAdminAuthenticated && !isSessionValid('socialpay_admin_auth_time')) {
+        console.log("Admin session expired");
+        setIsAdminAuthenticated(false);
+      }
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, [isAuthenticated, isAdminAuthenticated]);
 
   // Initialize state from localStorage or defaults
   const [user, setUser] = useState<User>(() => {
     const saved = localStorage.getItem('socialpay_user');
     if (saved) {
-      const parsed = JSON.parse(saved);
-      return {
-        id: '1',
-        role: 'admin',
-        status: 'active',
-        ...parsed,
-        recentActivity: parsed.recentActivity || []
-      };
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse saved user", e);
+      }
     }
     return {
-      id: '1',
-      name: 'Mike Akanji',
-      email: 'akanjimike004@gmail.com',
-      balance: 12450,
-      completedTasks: 48,
+      id: '',
+      name: 'Guest',
+      email: '',
+      phoneNumber: '',
+      balance: 0,
+      completedTasks: 0,
       isPaid: false,
-      role: 'admin',
+      role: 'user',
       status: 'active',
+      referralCode: '',
+      referralEarnings: 0,
       recentActivity: []
     };
   });
 
   const [users, setUsers] = useState<User[]>(() => {
     const saved = localStorage.getItem('socialpay_users');
-    return saved ? JSON.parse(saved) : [
+    let initialUsers = saved ? JSON.parse(saved) : [
       {
         id: '1',
         name: 'Mike Akanji',
         email: 'akanjimike004@gmail.com',
+        phoneNumber: '08012345678',
+        password: 'admin',
         balance: 12450,
         completedTasks: 48,
         isPaid: true,
         role: 'admin',
         status: 'active',
+        referralCode: 'ADMIN123',
+        referralEarnings: 0,
         recentActivity: []
       },
       {
         id: '2',
         name: 'Jane Doe',
         email: 'jane@example.com',
+        phoneNumber: '08087654321',
+        password: 'password',
         balance: 500,
         completedTasks: 5,
         isPaid: false,
         role: 'user',
         status: 'active',
+        referralCode: 'JANE456',
+        referralEarnings: 0,
         recentActivity: []
       },
       {
@@ -147,14 +209,31 @@ export default function App() {
         isPaid: false,
         role: 'user',
         status: 'pending',
+        referralCode: 'JOHN789',
+        referralEarnings: 0,
         recentActivity: []
       }
     ];
+
+    // Ensure admin user has the correct password even if loaded from stale localStorage
+    return initialUsers.map((u: User) => {
+      if (u.email === 'akanjimike004@gmail.com') {
+        return { ...u, password: 'admin', role: 'admin' };
+      }
+      return u;
+    });
   });
 
   useEffect(() => {
     localStorage.setItem('socialpay_users', JSON.stringify(users));
   }, [users]);
+
+  useEffect(() => {
+    console.log("App state - Users:", users.length, "Auth:", isAuthenticated, "AdminAuth:", isAdminAuthenticated);
+    if (isAuthenticated) {
+      console.log("Logged in as:", user.email);
+    }
+  }, [users, isAuthenticated, isAdminAuthenticated, user]);
 
   const [tasks, setTasks] = useState<Task[]>(() => {
     const saved = localStorage.getItem('socialpay_tasks');
@@ -205,10 +284,101 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleLogin = (email: string, name: string) => {
-    setUser(prev => ({ ...prev, email, name }));
-    setIsAuthenticated(true);
-    setActiveTab('dashboard');
+  const handleLogin = (email: string, name: string, phoneNumber: string, password?: string, referralCode?: string): string | null => {
+    console.log("Attempting login for:", email);
+    // Check if user exists
+    const existingUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (existingUser) {
+      console.log("User found:", existingUser.email);
+      // Verify password
+      if (password && existingUser.password === password) {
+        console.log("Password verified");
+        setUser(existingUser);
+        localStorage.setItem('socialpay_auth_time', new Date().getTime().toString());
+        localStorage.setItem('socialpay_auth', 'true');
+        localStorage.setItem('socialpay_user', JSON.stringify(existingUser));
+        setIsAuthenticated(true);
+        setActiveTab('dashboard');
+        return null;
+      } else {
+        console.log("Invalid password");
+        return 'Invalid password. Please try again.';
+      }
+    } else {
+      console.log("User not found");
+      // If name is empty, it means it was a sign-in attempt for a non-existent user
+      if (!name) {
+        return 'Account not found. Please sign up first.';
+      }
+
+      // Create new user
+      console.log("Creating new user:", name);
+      const newReferralCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const newUser: User = {
+        id: Math.random().toString(36).substring(2, 9),
+        name,
+        email,
+        phoneNumber,
+        password,
+        balance: 0,
+        completedTasks: 0,
+        isPaid: false, // Must pay 1500 Naira
+        role: 'user',
+        status: 'active',
+        referralCode: newReferralCode,
+        referralEarnings: 0,
+        referredBy: referralCode,
+        recentActivity: []
+      };
+
+      setUsers(prev => {
+        const newUsers = [...prev, newUser];
+        localStorage.setItem('socialpay_users', JSON.stringify(newUsers));
+        return newUsers;
+      });
+      setUser(newUser);
+      localStorage.setItem('socialpay_auth_time', new Date().getTime().toString());
+      localStorage.setItem('socialpay_auth', 'true');
+      localStorage.setItem('socialpay_user', JSON.stringify(newUser));
+      setIsAuthenticated(true);
+      setActiveTab('dashboard');
+      return null;
+    }
+  };
+
+  const handlePaymentSuccess = () => {
+    // If referred by someone, credit them 300 Naira ONLY AFTER payment
+    if (user.referredBy) {
+      setUsers(prev => prev.map(u => {
+        if (u.referralCode === user.referredBy) {
+          const updatedUser = {
+            ...u,
+            balance: u.balance + 300,
+            referralEarnings: u.referralEarnings + 300,
+            recentActivity: [
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                type: `Referral Bonus (${user.name})`,
+                amount: 300,
+                timestamp: new Date().toISOString()
+              },
+              ...u.recentActivity
+            ].slice(0, 10)
+          };
+          // If the referrer is the current user (unlikely but for consistency)
+          if (u.id === user.id) {
+            // This shouldn't happen as user.id is new
+          }
+          return updatedUser;
+        }
+        return u;
+      }));
+    }
+
+    const updatedUser = { ...user, isPaid: true };
+    setUser(updatedUser);
+    setUsers(prev => prev.map(u => u.id === user.id ? updatedUser : u));
   };
 
   const handleLogout = () => {
@@ -315,6 +485,11 @@ export default function App() {
       return <LoginView onLogin={handleLogin} />;
     }
 
+    // Payment check
+    if (isAuthenticated && !user.isPaid && user.role !== 'admin' && activeTab !== 'home' && activeTab !== 'privacy' && activeTab !== 'about' && activeTab !== 'contact') {
+      return <PaymentView onPaymentSuccess={handlePaymentSuccess} user={user} />;
+    }
+
     switch (activeTab) {
       case 'home':
         return (
@@ -336,7 +511,6 @@ export default function App() {
       case 'privacy':
         return <PrivacyPolicyView />;
       case 'admin':
-        if (user.role !== 'admin') return <DashboardView user={user} tasks={tasks} onNavigate={setActiveTab} onUpdateUser={handleUpdateUser} />;
         if (!isAdminAuthenticated) return <AdminLoginView onLogin={() => setIsAdminAuthenticated(true)} />;
         return (
           <AdminView 
@@ -405,7 +579,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <div className="hidden sm:flex flex-col items-end mr-1">
                     <p className="text-xs font-bold text-slate-900 leading-none">{user.name}</p>
-                    <p className="text-[10px] font-medium text-emerald-600 leading-none mt-1">₦{user.balance.toLocaleString()}</p>
+                    <p className="text-[10px] font-medium text-emerald-600 leading-none mt-1">₦{(user.balance || 0).toLocaleString()}</p>
                   </div>
                   
                   <div className="relative group/profile">
@@ -459,12 +633,20 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <button 
-                  onClick={() => setActiveTab('dashboard')}
-                  className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-200 active:scale-95"
-                >
-                  Sign In
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setActiveTab('dashboard')}
+                    className="hidden sm:block px-5 py-2.5 text-slate-600 font-bold text-sm hover:text-emerald-600 transition-all"
+                  >
+                    Sign In
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('dashboard')}
+                    className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-200 active:scale-95"
+                  >
+                    Get Started
+                  </button>
+                </div>
               )}
 
               {/* Mobile Menu Toggle */}
@@ -534,7 +716,7 @@ export default function App() {
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-bold text-slate-900">{user.name}</p>
-                      <p className="text-xs text-emerald-600 font-medium">₦{user.balance.toLocaleString()}</p>
+                      <p className="text-xs text-emerald-600 font-medium">₦{(user.balance || 0).toLocaleString()}</p>
                     </div>
                   </div>
                   <button 
@@ -546,12 +728,18 @@ export default function App() {
                   </button>
                 </div>
               ) : (
-                <div className="p-4 border-t border-slate-100">
+                <div className="p-4 border-t border-slate-100 space-y-3">
                   <button 
                     onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
                     className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-100"
                   >
-                    Sign In to Account
+                    Get Started / Sign Up
+                  </button>
+                  <button 
+                    onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
+                    className="w-full py-3 text-slate-600 font-bold hover:bg-slate-50 rounded-xl transition-colors"
+                  >
+                    Sign In
                   </button>
                 </div>
               )}
@@ -611,14 +799,12 @@ export default function App() {
             <div className="border-t border-slate-100 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
               <div className="flex flex-col gap-1">
                 <p className="text-xs text-slate-400">© 2026 SocialPay. All rights reserved.</p>
-                {user.role === 'admin' && (
-                  <button 
-                    onClick={() => setActiveTab('admin')}
-                    className="text-[10px] text-slate-300 hover:text-emerald-500 transition-all text-left uppercase tracking-widest font-bold"
-                  >
-                    Admin Access
-                  </button>
-                )}
+                <button 
+                  onClick={() => setActiveTab('admin')}
+                  className="text-[10px] text-slate-300 hover:text-emerald-600 transition-colors mt-1 text-left uppercase tracking-widest font-bold"
+                >
+                  Staff Portal Access
+                </button>
               </div>
               <div className="flex gap-4">
                 <Instagram size={18} className="text-slate-400 hover:text-emerald-600 cursor-pointer" />
@@ -714,10 +900,10 @@ function DashboardView({
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           title="Total Balance" 
-          value={`₦${user.balance.toLocaleString()}`} 
+          value={`₦${(user.balance || 0).toLocaleString()}`} 
           icon={<Wallet className="text-blue-600" />} 
           trend="+12% this week"
           color="blue"
@@ -730,12 +916,50 @@ function DashboardView({
           color="emerald"
         />
         <StatCard 
+          title="Referral Earnings" 
+          value={`₦${(user.referralEarnings || 0).toLocaleString()}`} 
+          icon={<UserPlus className="text-purple-600" />} 
+          trend="₦300 per referral"
+          color="purple"
+        />
+        <StatCard 
           title="Available Tasks" 
           value={availableTasks.toString()} 
           icon={<ShoppingBag className="text-orange-600" />} 
           trend={`${pendingTasks} pending verification`}
           color="orange"
         />
+      </div>
+
+      {/* Referral Section */}
+      <div className="bg-gradient-to-br from-purple-600 to-indigo-700 rounded-[32px] p-8 text-white shadow-xl shadow-purple-200 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-8 opacity-10">
+          <Share2 size={120} />
+        </div>
+        <div className="relative z-10">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2">
+              <h3 className="text-2xl font-black">Refer & Earn ₦300</h3>
+              <p className="text-purple-100 max-w-md">
+                Invite your friends to SocialPay. When they sign up and activate their account, you'll instantly receive ₦300 in your wallet!
+              </p>
+            </div>
+            <div className="bg-white/10 backdrop-blur-md border border-white/20 p-6 rounded-2xl flex flex-col items-center gap-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-purple-200">Your Referral Code</p>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-black tracking-widest font-mono">{user.referralCode}</span>
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(user.referralCode);
+                  }}
+                  className="p-2 bg-white text-purple-600 rounded-lg hover:bg-purple-50 transition-all"
+                >
+                  <Share2 size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {user.bankDetails && (
@@ -839,7 +1063,7 @@ function DashboardView({
                   <p className="text-sm font-medium">{task.type} on {task.platform}</p>
                   <p className="text-xs text-slate-500">{task.status === 'completed' ? 'Verified' : 'Pending verification'}</p>
                 </div>
-                <div className="text-sm font-bold text-emerald-600">+₦{task.reward.toLocaleString()}</div>
+                <div className="text-sm font-bold text-emerald-600">+₦{(task.reward || 0).toLocaleString()}</div>
               </div>
             ))}
             {tasks.filter(t => t.status !== 'available').length === 0 && (
@@ -967,7 +1191,7 @@ function TaskCard({ task, onComplete }: { task: Task, onComplete: (id: string, p
             </div>
             <div className="text-right">
               <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Reward</p>
-              <p className="text-xl font-bold text-emerald-600">₦{task.reward.toLocaleString()}</p>
+              <p className="text-xl font-bold text-emerald-600">₦{(task.reward || 0).toLocaleString()}</p>
             </div>
           </div>
           
@@ -1060,15 +1284,19 @@ function BankDetailsForm({
       <div className="space-y-2">
         <label className="text-sm font-bold text-slate-700 ml-1">Bank Name</label>
         <div className="relative">
-          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
+          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
+          <select 
             required
             value={bankName}
             onChange={(e) => setBankName(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
-            placeholder="e.g. Zenith Bank"
-          />
+            className="w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all appearance-none"
+          >
+            <option value="">Select Bank</option>
+            <option value="Opay">Opay</option>
+            <option value="Palm pay">Palm pay</option>
+            <option value="moniepoint">moniepoint</option>
+          </select>
+          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={18} />
         </div>
       </div>
       <div className="space-y-2">
@@ -1199,7 +1427,7 @@ function WithdrawalModal({
           <div className="space-y-2">
             <div className="flex justify-between items-end mb-1">
               <label className="text-xs font-bold text-slate-400 uppercase ml-1">Amount to Withdraw (₦)</label>
-              <span className="text-xs font-bold text-emerald-600">Balance: ₦{balance.toLocaleString()}</span>
+              <span className="text-xs font-bold text-emerald-600">Balance: ₦{(balance || 0).toLocaleString()}</span>
             </div>
             <div className="relative">
               <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">₦</span>
@@ -1219,12 +1447,12 @@ function WithdrawalModal({
           <div className="bg-slate-50 rounded-2xl p-6 space-y-3 border border-slate-100">
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Service Charge (10%)</span>
-              <span className="font-bold text-red-600">-₦{fee.toLocaleString()}</span>
+              <span className="font-bold text-red-600">-₦{(fee || 0).toLocaleString()}</span>
             </div>
             <div className="h-px bg-slate-200 w-full"></div>
             <div className="flex justify-between items-center">
               <span className="font-bold text-slate-900">Net Payout</span>
-              <span className="text-xl font-black text-emerald-600">₦{netAmount.toLocaleString()}</span>
+              <span className="text-xl font-black text-emerald-600">₦{(netAmount || 0).toLocaleString()}</span>
             </div>
           </div>
 
@@ -1278,7 +1506,7 @@ function WalletView({
         <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
           <div>
             <p className="text-slate-400 font-medium mb-1">Available Balance</p>
-            <h2 className="text-5xl font-bold mb-6">₦{user.balance.toLocaleString()}</h2>
+            <h2 className="text-5xl font-bold mb-6">₦{(user.balance || 0).toLocaleString()}</h2>
             <div className="flex gap-4">
               <button 
                 onClick={() => {
@@ -1426,7 +1654,7 @@ function WalletView({
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-bold text-red-600">-₦{w.amount.toLocaleString()}</p>
+                  <p className="text-sm font-bold text-red-600">-₦{(w.amount || 0).toLocaleString()}</p>
                   <p className={`text-[10px] font-bold uppercase tracking-wider ${
                     w.status === 'approved' ? 'text-emerald-600' : 
                     w.status === 'rejected' ? 'text-red-600' : 'text-orange-600'
@@ -1450,7 +1678,7 @@ function WalletView({
                 </div>
                 <div className="text-right">
                   <p className={`text-sm font-bold ${activity.amount > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {activity.amount > 0 ? '+' : ''}₦{Math.abs(activity.amount).toLocaleString()}
+                    {activity.amount > 0 ? '+' : ''}₦{(Math.abs(activity.amount) || 0).toLocaleString()}
                   </p>
                   <p className="text-xs text-slate-400">Completed</p>
                 </div>
@@ -1463,15 +1691,127 @@ function WalletView({
   );
 }
 
-function LoginView({ onLogin }: { onLogin: (email: string, name: string) => void }) {
+function PaymentView({ onPaymentSuccess, user }: { onPaymentSuccess: () => void, user: User }) {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleSimulatedPayment = () => {
+    setIsProcessing(true);
+    // Simulate payment gateway delay
+    setTimeout(() => {
+      setIsProcessing(false);
+      onPaymentSuccess();
+    }, 2000);
+  };
+
+  return (
+    <div className="max-w-xl mx-auto py-12 px-4">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-[32px] border border-slate-200 shadow-2xl overflow-hidden"
+      >
+        <div className="p-8 sm:p-12">
+          <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-inner">
+            <ShieldCheck size={40} />
+          </div>
+          
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-black text-slate-900 leading-tight">Account Activation Required</h2>
+            <p className="text-slate-500 mt-4 text-lg">
+              To start earning on SocialPay, a one-time activation fee of <span className="text-emerald-600 font-black">₦1,500</span> is required.
+            </p>
+          </div>
+
+          <div className="bg-slate-50 rounded-2xl p-6 mb-8 border border-slate-100">
+            <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <CheckCircle2 size={18} className="text-emerald-500" />
+              What you get:
+            </h4>
+            <ul className="space-y-3">
+              {[
+                'Access to high-paying social media tasks',
+                'Instant withdrawal to your bank account',
+                '₦300 bonus for every friend you refer',
+                '24/7 priority customer support',
+                'Lifetime membership with no hidden fees'
+              ].map((benefit, i) => (
+                <li key={i} className="flex items-start gap-3 text-sm text-slate-600">
+                  <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-600"></div>
+                  </div>
+                  {benefit}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <button 
+            onClick={handleSimulatedPayment}
+            disabled={isProcessing}
+            className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-lg hover:bg-emerald-500 transition-all shadow-xl shadow-emerald-200 flex items-center justify-center gap-3 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {isProcessing ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                Processing Payment...
+              </>
+            ) : (
+              <>
+                Pay ₦1,500 & Activate Now
+                <ArrowRight size={20} />
+              </>
+            )}
+          </button>
+
+          <p className="text-center text-xs text-slate-400 mt-6 font-medium">
+            Secure payment processed via SocialPay Secure Gateway.
+          </p>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function LoginView({ onLogin }: { onLogin: (email: string, name: string, phoneNumber: string, password?: string, referralCode?: string) => string | null }) {
+  const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [password, setPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && name) {
-      onLogin(email, name);
-    }
+    console.log("Login form submitted. isSignUp:", isSignUp, "email:", email);
+    setError('');
+    setIsLoading(true);
+
+    // Small timeout to show loading state and prevent double submission
+    setTimeout(() => {
+      console.log("Executing login logic...");
+      let loginError: string | null = null;
+      if (isSignUp) {
+        if (email && name && phoneNumber && password) {
+          loginError = onLogin(email, name, phoneNumber, password, referralCode);
+        } else {
+          loginError = 'Please fill in all required fields';
+        }
+      } else {
+        if (email && password) {
+          loginError = onLogin(email, '', '', password);
+        } else {
+          loginError = 'Please enter your email and password';
+        }
+      }
+
+      console.log("Login result error:", loginError);
+      if (loginError) {
+        setError(loginError);
+        setIsLoading(false);
+      }
+    }, 500);
   };
 
   return (
@@ -1481,25 +1821,70 @@ function LoginView({ onLogin }: { onLogin: (email: string, name: string) => void
           <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>
-          <p className="text-slate-500">Login to your SocialPay account</p>
+          <h2 className="text-2xl font-bold text-slate-900">
+            {isSignUp ? 'Create Account' : 'Welcome Back'}
+          </h2>
+          <p className="text-slate-500">
+            {isSignUp ? 'Join SocialPay and start earning' : 'Sign in to your SocialPay account'}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700 ml-1">Full Name</label>
-            <div className="relative">
-              <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text" 
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter your name" 
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-              />
-            </div>
+        <div className="flex bg-slate-100 p-1 rounded-xl mb-8">
+          <button 
+            onClick={() => setIsSignUp(false)}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isSignUp ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Sign In
+          </button>
+          <button 
+            onClick={() => setIsSignUp(true)}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isSignUp ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            Sign Up
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-6 p-3 bg-red-50 border border-red-100 text-red-600 text-sm rounded-xl flex items-center gap-2">
+            <ShieldAlert size={16} />
+            {error}
           </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {isSignUp && (
+            <>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700 ml-1">Full Name</label>
+                <div className="relative">
+                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text" 
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Enter your name" 
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700 ml-1">Phone Number</label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="tel" 
+                    required
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="Enter phone number" 
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+          
           <div className="space-y-2">
             <label className="text-sm font-bold text-slate-700 ml-1">Email Address</label>
             <div className="relative">
@@ -1514,17 +1899,66 @@ function LoginView({ onLogin }: { onLogin: (email: string, name: string) => void
               />
             </div>
           </div>
+          
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-slate-700 ml-1">Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input 
+                type="password" 
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isSignUp ? "Create a password" : "Enter your password"}
+                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          {isSignUp && (
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-700 ml-1">Referral Code (Optional)</label>
+              <div className="relative">
+                <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type="text" 
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)}
+                  placeholder="Enter referral code" 
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                />
+              </div>
+            </div>
+          )}
+
           <button 
             type="submit"
-            className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-100 mt-4"
+            disabled={isLoading}
+            className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-500 disabled:bg-emerald-400 transition-all shadow-lg shadow-emerald-100 mt-4 flex items-center justify-center gap-2"
           >
-            Access Dashboard
+            {isLoading ? (
+              <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <>
+                {isSignUp ? 'Create Account' : 'Sign In'}
+                <ArrowRight size={20} />
+              </>
+            )}
           </button>
         </form>
         
+        <div className="mt-6 text-center">
+          <button 
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="text-sm text-emerald-600 font-bold hover:underline"
+          >
+            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+          </button>
+        </div>
+        
         <div className="mt-8 pt-6 border-t border-slate-100 text-center">
           <p className="text-sm text-slate-500">
-            By logging in, you agree to our <span className="text-emerald-600 font-bold cursor-pointer">Privacy Policy</span>
+            By continuing, you agree to our <span className="text-emerald-600 font-bold cursor-pointer">Privacy Policy</span>
           </p>
         </div>
       </div>
@@ -1825,7 +2259,7 @@ function AdminLoginView({ onLogin }: { onLogin: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     // In a real app, this would be a server-side check
-    if (password === 'admin123') {
+    if (password === 'admin') {
       onLogin();
     } else {
       setError('Invalid administrator password.');
@@ -1936,8 +2370,9 @@ function AdminView({
     w.bankDetails.bankName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalBalance = users.reduce((sum, u) => sum + u.balance, 0);
-  const totalFees = withdrawals.reduce((sum, w) => sum + w.fee, 0);
+  const totalBalance = users.reduce((sum, u) => sum + (u.balance || 0), 0);
+  const totalFees = withdrawals.reduce((sum, w) => sum + (w.fee || 0), 0);
+  const totalSignupPayments = users.filter(u => u.isPaid && u.role !== 'admin').length * 1500;
   const pendingTasksCount = tasks.filter(t => t.status === 'pending').length;
   const pendingWithdrawalsCount = withdrawals.filter(w => w.status === 'pending').length;
 
@@ -1950,15 +2385,19 @@ function AdminView({
         </div>
         <div className="flex flex-wrap gap-3">
           <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <p className="text-[10px] font-bold text-slate-400 uppercase">Total User Funds</p>
-            <p className="text-lg font-bold text-emerald-600">₦{totalBalance.toLocaleString()}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">User Funds</p>
+            <p className="text-lg font-bold text-emerald-600">₦{(totalBalance || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <p className="text-[10px] font-bold text-slate-400 uppercase">Service Fees (10%)</p>
-            <p className="text-lg font-bold text-blue-600">₦{totalFees.toLocaleString()}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">Signup Fees</p>
+            <p className="text-lg font-bold text-purple-600">₦{(totalSignupPayments || 0).toLocaleString()}</p>
           </div>
           <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <p className="text-[10px] font-bold text-slate-400 uppercase">Pending Items</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase">Service Fees</p>
+            <p className="text-lg font-bold text-blue-600">₦{(totalFees || 0).toLocaleString()}</p>
+          </div>
+          <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
+            <p className="text-[10px] font-bold text-slate-400 uppercase">Pending</p>
             <p className="text-lg font-bold text-orange-600">{pendingTasksCount + pendingWithdrawalsCount}</p>
           </div>
         </div>
@@ -2051,7 +2490,7 @@ function AdminView({
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-sm font-bold text-slate-900">₦{u.balance.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-slate-900">₦{(u.balance || 0).toLocaleString()}</p>
                     </td>
                     <td className="px-6 py-4">
                       <p className="text-sm font-medium text-slate-600">{u.completedTasks}</p>
@@ -2191,13 +2630,13 @@ function AdminView({
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-sm font-bold text-slate-900">₦{w.amount.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-slate-900">₦{(w.amount || 0).toLocaleString()}</p>
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-sm font-bold text-red-600">₦{w.fee.toLocaleString()}</p>
+                      <p className="text-sm font-bold text-red-600">₦{(w.fee || 0).toLocaleString()}</p>
                     </td>
                     <td className="px-6 py-4">
-                      <p className="text-sm font-black text-emerald-600">₦{w.netAmount.toLocaleString()}</p>
+                      <p className="text-sm font-black text-emerald-600">₦{(w.netAmount || 0).toLocaleString()}</p>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
